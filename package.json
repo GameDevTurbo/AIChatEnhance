@@ -1,0 +1,53 @@
+{
+  "name": "task-planner",
+  "displayName": "Task Planner",
+  "description": "AI 规划窗口 — 并行分析需求，自动匹配 Skill，生成执行计划",
+  "version": "0.1.0",
+  "engines": { "vscode": "^1.95.0" },
+  "categories": ["AI"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "task-planner-container",
+          "title": "Task Planner",
+          "icon": "$(robot)"
+        }
+      ]
+    },
+    "views": {
+      "task-planner-container": [
+        {
+          "id": "taskPlannerView",
+          "name": "Task Planner"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "taskPlannerView",
+        "contents": "在编辑器中打开完整规划面板。\n[打开 Task Planner](command:task-planner.openPlanner)"
+      }
+    ],
+    "commands": [
+      {
+        "command": "task-planner.openPlanner",
+        "title": "Task Planner: 打开规划窗口",
+        "icon": "$(robot)"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.95.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0"
+  }
+}
