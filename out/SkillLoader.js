@@ -37,9 +37,9 @@ exports.getAllSkillNames = getAllSkillNames;
 exports.getSkillDescriptions = getSkillDescriptions;
 exports.loadMatchingSkills = loadMatchingSkills;
 exports.scanPromptTemplates = scanPromptTemplates;
+exports.loadWorkspaceContext = loadWorkspaceContext;
 const vscode = __importStar(require("vscode"));
 const path = __importStar(require("path"));
-const fs = __importStar(require("fs"));
 /** 关键词路由表 — 与 SKILL.md 10 项路由一致 */
 const SKILL_KEYWORD_MAP = {
     'context': ['目录', '结构', 'asmdef', '命名空间', '程序集', '架构', 'namespace', 'assembly'],
@@ -54,43 +54,57 @@ const SKILL_KEYWORD_MAP = {
     'issues': ['问题', 'issue', '故障', 'bug', '排查', '踩坑', '历史'],
     'SKILL': [], // 索引文件，始终加载
 };
-/** 内置 fallback 知识 */
-const BUILTIN_SKILLS = {
-    'SKILL': '# 项目规范索引\n- MVC 分层架构\n- LazyEvent 事件通信\n- UniTask 替代 Coroutine\n- 命名空间与目录一致',
-    'context': '# 程序集与依赖\n- Core / Game / UI / Editor 四个 asmdef\n- 跨程序集通过事件解耦\n- 命名空间 = LazyUniKit.{Assembly}.{SubFolder}',
-    'code': '# 代码规范\n- PascalCase 类名, _camelCase 私有字段\n- UniTask 异步, 方法后缀 Async\n- LazyLog 替代 Debug.Log\n- [SerializeField] private, 禁止 public 字段\n- 禁止 PowerShell 写中文到 .cs 文件',
-    'ui': '# UI 系统\n- UIWindow 基类, UILayer 层级管理\n- Background/Normal/Popup/Top 四层\n- TextMeshPro, 对象池虚拟滚动',
-    'battle': '# 战斗系统\n- BattleDirector 调度, ScoreSystem 评分\n- Combo 倍率上限 3.0, 时间奖励\n- 事件: BattleStart/End, ScoreChanged, ComboChanged',
-    'events': '# 事件系统\n- LazyEvent<T>: On/Once/Off/Emit\n- Args 用 readonly struct\n- 订阅必须在 OnDestroy 取消\n- Game↔UI 通过事件解耦',
-    'docs': '# 文档维护\n- Docs/*.html 格式\n- 新功能必须同步更新文档',
-    'communication': '# 沟通规则\n- 方案选择制(列2-3方案)\n- 发现上报制\n- 变更确认制(架构级改动需确认)',
-    'workflow': '# 工作流\n- Plan-First: 分析→规划→路由→执行→验证→文档→回顾\n- dotnet build 强制验证\n- SubAgent 并行调研',
-    'review': '# 框架审查\n- 4阶段: 基础设施→核心系统→游戏机制→工具链\n- 审查清单: 命名/依赖/async/事件/日志',
-    'issues': '# 历史问题\n- 已记录 I001-I012\n- 常见: 编码乱码/asmdef引用/事件泄漏',
-};
-/** 获取 Skill 磁盘目录路径 */
-function getSkillsDir() {
-    const rootPath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    return rootPath ? path.join(rootPath, '.github', 'skills', 'lazyunikit-project') : '';
+// ─── 辅助 ──────────────────────────────────────────
+async function fileExists(uri) {
+    try {
+        await vscode.workspace.fs.stat(uri);
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+async function readText(uri) {
+    const data = await vscode.workspace.fs.readFile(uri);
+    return Buffer.from(data).toString('utf-8');
+}
+/** 获取 Skill 磁盘目录路径（扫描 .github/skills/ 下所有子目录） */
+async function getSkillsDirs() {
+    const rootPath = vscode.workspace.workspaceFolders?.[0]?.uri;
+    if (!rootPath) {
+        return [];
+    }
+    const skillsRoot = vscode.Uri.joinPath(rootPath, '.github', 'skills');
+    if (!await fileExists(skillsRoot)) {
+        return [];
+    }
+    try {
+        const entries = await vscode.workspace.fs.readDirectory(skillsRoot);
+        return entries
+            .filter(([, type]) => type === vscode.FileType.Directory)
+            .map(([name]) => vscode.Uri.joinPath(skillsRoot, name));
+    }
+    catch {
+        return [];
+    }
 }
 /** 获取所有可用 Skill 的名称列表 */
 function getAllSkillNames() {
     return Object.keys(SKILL_KEYWORD_MAP);
 }
 /** 获取每个 Skill 的简要描述（用于浏览面板） */
-function getSkillDescriptions() {
-    const skillsDir = getSkillsDir();
-    const hasDir = skillsDir !== '' && fs.existsSync(skillsDir);
-    return Object.entries(SKILL_KEYWORD_MAP).map(([name, keywords]) => ({
+async function getSkillDescriptions() {
+    const dirs = await getSkillsDirs();
+    const results = await Promise.all(Object.entries(SKILL_KEYWORD_MAP).map(async ([name, keywords]) => ({
         name,
         keywords,
-        hasFile: hasDir && fs.existsSync(path.join(skillsDir, `${name}.md`)),
-    }));
+        hasFile: (await Promise.all(dirs.map(dir => fileExists(vscode.Uri.joinPath(dir, `${name}.md`))))).some(Boolean),
+    })));
+    return results;
 }
 /** 根据需求文本匹配相关 Skill 并加载内容 */
 async function loadMatchingSkills(requirement) {
-    const skillsDir = getSkillsDir();
-    const hasExternal = skillsDir !== '' && fs.existsSync(skillsDir);
+    const dirs = await getSkillsDirs();
     const req = requirement.toLowerCase();
     const matched = [];
     for (const [skillName, keywords] of Object.entries(SKILL_KEYWORD_MAP)) {
@@ -99,39 +113,36 @@ async function loadMatchingSkills(requirement) {
         if (!isAlwaysLoad && !isKeywordMatch) {
             continue;
         }
-        if (hasExternal) {
-            const fp = path.join(skillsDir, `${skillName}.md`);
-            if (fs.existsSync(fp)) {
-                matched.push({ name: skillName, content: fs.readFileSync(fp, 'utf-8') });
-                continue;
+        for (const dir of dirs) {
+            const uri = vscode.Uri.joinPath(dir, `${skillName}.md`);
+            if (await fileExists(uri)) {
+                matched.push({ name: skillName, content: await readText(uri) });
+                break;
             }
-        }
-        if (BUILTIN_SKILLS[skillName]) {
-            matched.push({ name: skillName, content: BUILTIN_SKILLS[skillName] });
         }
     }
     return matched;
 }
 /** 扫描工作区中所有 .prompt.md 文件 */
 async function scanPromptTemplates() {
-    const rootPath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    const rootPath = vscode.workspace.workspaceFolders?.[0]?.uri;
     if (!rootPath) {
         return [];
     }
     const templates = [];
     const searchDirs = [
-        path.join(rootPath, '.github', 'prompts'),
-        path.join(rootPath, '.github'),
+        vscode.Uri.joinPath(rootPath, '.github', 'prompts'),
+        vscode.Uri.joinPath(rootPath, '.github'),
     ];
     // 也扫描用户级 prompts 目录
     const userPromptsDir = process.env.APPDATA
         ? path.join(process.env.APPDATA, 'Code', 'User', 'prompts')
         : '';
     if (userPromptsDir) {
-        searchDirs.push(userPromptsDir);
+        searchDirs.push(vscode.Uri.file(userPromptsDir));
     }
     for (const dir of searchDirs) {
-        if (!fs.existsSync(dir)) {
+        if (!await fileExists(dir)) {
             continue;
         }
         await scanDirForPrompts(dir, templates);
@@ -141,24 +152,24 @@ async function scanPromptTemplates() {
 async function scanDirForPrompts(dir, results) {
     let entries;
     try {
-        entries = fs.readdirSync(dir, { withFileTypes: true });
+        entries = await vscode.workspace.fs.readDirectory(dir);
     }
     catch {
         return;
     }
-    for (const entry of entries) {
-        const fullPath = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-            await scanDirForPrompts(fullPath, results);
+    for (const [name, type] of entries) {
+        const fullUri = vscode.Uri.joinPath(dir, name);
+        if (type === vscode.FileType.Directory) {
+            await scanDirForPrompts(fullUri, results);
         }
-        else if (entry.name.endsWith('.prompt.md')) {
+        else if (name.endsWith('.prompt.md')) {
             try {
-                const content = fs.readFileSync(fullPath, 'utf-8');
+                const content = await readText(fullUri);
                 const desc = extractFrontmatterField(content, 'description') || '(no description)';
                 results.push({
-                    name: entry.name.replace(/\.prompt\.md$/, ''),
+                    name: name.replace(/\.prompt\.md$/, ''),
                     description: desc,
-                    filePath: fullPath,
+                    filePath: fullUri.fsPath,
                     content,
                 });
             }
@@ -174,5 +185,28 @@ function extractFrontmatterField(content, field) {
     const re = new RegExp(`^${field}:\\s*(.+)$`, 'm');
     const m = fmMatch[1].match(re);
     return m ? m[1].trim().replace(/^['"]|['"]$/g, '') : '';
+}
+/** 从工作区读取项目级指令文件，作为动态上下文 */
+async function loadWorkspaceContext() {
+    const rootPath = vscode.workspace.workspaceFolders?.[0]?.uri;
+    if (!rootPath) {
+        return '';
+    }
+    const candidates = [
+        vscode.Uri.joinPath(rootPath, '.github', 'copilot-instructions.md'),
+        vscode.Uri.joinPath(rootPath, 'CLAUDE.md'),
+        vscode.Uri.joinPath(rootPath, 'AGENTS.md'),
+    ];
+    const parts = [];
+    for (const uri of candidates) {
+        if (await fileExists(uri)) {
+            try {
+                const content = (await readText(uri)).slice(0, 1500);
+                parts.push(`[${path.basename(uri.fsPath)}]\n${content}`);
+            }
+            catch { /* skip */ }
+        }
+    }
+    return parts.join('\n\n');
 }
 //# sourceMappingURL=SkillLoader.js.map

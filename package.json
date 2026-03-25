@@ -37,7 +37,23 @@
         "title": "Task Planner: 打开规划窗口",
         "icon": "$(robot)"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "AI Chat Enhance",
+      "properties": {
+        "aichatEnhance.hiddenModels": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "要从模型列表中隐藏的模型关键词（匹配 id / name / family，不区分大小写）"
+        },
+        "aichatEnhance.modelMultipliers": {
+          "type": "object",
+          "default": {},
+          "description": "自定义模型消耗倍率覆盖表，key 为模型 family（小写），value 为倍率数字。示例：{\"my-model\": 2}"
+        }
+      }
+    }
   },
   "scripts": {
     "compile": "tsc -p ./",

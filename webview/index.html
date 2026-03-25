@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy"
+  content="default-src 'none'; style-src {{cspSource}}; script-src 'nonce-{{nonce}}'; img-src data:;">
+<link rel="stylesheet" href="{{styleUri}}">
+</head>
+<body>
+<div class="container">
+
+  <!-- Upper Panel (Browse) -->
+  <div class="upper-toggle" id="upperToggle" data-action="toggleUpper">
+    <span class="arrow">&#9656;</span> Skills &amp; Templates
+    <span class="dim" id="browseStatus"></span>
+  </div>
+  <div class="upper-panel collapsed" id="upperPanel">
+    <div class="upper-body">
+      <div class="browse-section">
+        <h5>Skills</h5>
+        <div class="browse-grid" id="browseSkills"><span class="dim">loading...</span></div>
+      </div>
+      <div class="browse-section">
+        <h5>Prompt Templates</h5>
+        <div class="tmpl-list" id="browseTemplates"><span class="dim">loading...</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stepper Bar -->
+  <div class="stepper-bar" id="stepperBar">
+    <div class="step-item active" data-action="goStep" data-param="1">
+      <div class="step-num">1</div>
+      <span class="step-label">&#36755;&#20837;</span>
+    </div>
+    <div class="step-line" id="line-1-2"></div>
+    <div class="step-item" data-action="goStep" data-param="2">
+      <div class="step-num">2</div>
+      <span class="step-label">&#20998;&#26512;</span>
+    </div>
+    <div class="step-line" id="line-2-3"></div>
+    <div class="step-item" data-action="goStep" data-param="3">
+      <div class="step-num">3</div>
+      <span class="step-label">&#35745;&#21010;</span>
+    </div>
+    <div class="step-line" id="line-3-4"></div>
+    <div class="step-item" data-action="goStep" data-param="4">
+      <div class="step-num">4</div>
+      <span class="step-label">&#25191;&#34892;</span>
+    </div>
+  </div>
+
+  <!-- Step Content -->
+  <div class="step-content">
+
+    <!-- Step 1: Input -->
+    <div class="step-page active" id="step-1">
+      <div class="step1-model open" id="step1ModelSection" style="display:flex;flex-direction:column;min-height:0;overflow:hidden;border-bottom:1px solid var(--border);padding-bottom:8px;">
+        <div class="model-section-toggle open" id="modelSectionToggle" data-action="toggleModelSection">
+          <span class="arrow">&#9656;</span> &#27169;&#22411;&#36873;&#25321;
+          <span class="dim" id="modelSummary" style="font-weight:normal;text-transform:none;letter-spacing:0;">&#33267;&#23569;&#19968;&#20010;&#20027;&#27169;&#22411;</span>
+        </div>
+        <div id="modelSectionBody" style="flex:1;min-height:0;display:flex;flex-direction:column;">
+          <div class="model-table-wrap" style="flex:1;min-height:0;">
+            <table class="model-table">
+              <thead><tr><th>&#20027;</th><th>&#21442;&#19982;</th><th>&#27169;&#22411;</th><th>&#19978;&#19979;&#25991;</th><th>&#20493;&#29575;</th></tr></thead>
+              <tbody id="modelBody">
+                <tr><td colspan="5" style="text-align:center;padding:14px;color:var(--fg-dim);">&#28857;&#20987;&#19979;&#26041;&#25353;&#38062;&#21152;&#36733;&#21487;&#29992;&#27169;&#22411;</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="row">
+            <button class="btn-sec btn-sm" data-action="loadModels">&#128260; &#21152;&#36733;&#27169;&#22411;</button>
+            <span class="dim" id="modelCount"></span>
+            <button class="btn-sec btn-sm hidden" id="modelExpandBtn" data-action="toggleModelExpand">&#26356;&#22810; &#9660;</button>
+          </div>
+        </div>
+      </div>
+      <div class="step1-input" style="flex:1;min-height:0;overflow:auto;padding-top:8px;display:flex;flex-direction:column;">
+        <div class="mode-toggle">
+          <div class="mode-btn active" data-action="setMode" data-param="requirement">&#38656;&#27714;&#25991;&#26412;</div>
+          <div class="mode-btn" data-action="setMode" data-param="conversation">&#23545;&#35805;&#25552;&#21462;</div>
+        </div>
+        <div id="modeRequirement" style="flex:1;display:flex;flex-direction:column;min-height:0;">
+          <h4>&#38656;&#27714;&#25551;&#36848;</h4>
+          <textarea id="req" style="flex:1;min-height:100px;" placeholder="&#25551;&#36848;&#20320;&#35201;&#20570;&#20160;&#20040;&#65292;&#20363;&#22914;&#65306;&#32473;&#25112;&#26007;&#31995;&#32479;&#26032;&#22686;&#20498;&#35745;&#26102;&#22870;&#21169;&#65292;&#20851;&#21345;&#32467;&#26463;&#21069;&#23436;&#25104;&#32473;&#39069;&#22806;&#20998;&#25968;"></textarea>
+          <div class="img-attach-area">
+            <div class="img-attach-row">
+              <button class="btn-sec btn-sm" data-action="attachImages">&#128444;&#65039; &#38468;&#21152;&#22270;&#29255;</button>
+              <span class="dim" id="imgCount"></span>
+            </div>
+            <div class="img-thumbs" id="imgThumbs"></div>
+          </div>
+        </div>
+        <div id="modeConversation" class="hidden">
+          <h4>&#31896;&#36148;&#23545;&#35805;&#20869;&#23481;</h4>
+          <textarea id="chatInput" style="min-height:120px;" placeholder="&#31896;&#36148;&#20320;&#21644; AI &#30340;&#32842;&#22825;&#35760;&#24405;&#8230;&#22810;&#20010; AI &#35270;&#35282;&#23558;&#24182;&#34892;&#20998;&#26512;&#24182;&#25552;&#21462;&#32467;&#26500;&#21270;&#20219;&#21153;&#12290;"></textarea>
+          <div class="row">
+            <button class="btn-sec" data-action="extractChat" id="extractBtn">&#128269; &#25552;&#21462;&#20219;&#21153;</button>
+          </div>
+          <div id="extractResult" class="hidden"></div>
+        </div>
+        <h4 style="margin-top:8px;">&#21305;&#37197; Skills</h4>
+        <div class="skill-tags" id="skillTags"></div>
+        <div id="skillHint" class="dim" style="margin-top:4px;">&#36755;&#20837;&#38656;&#27714;&#21518;&#33258;&#21160;&#21305;&#37197;</div>
+        <div class="row">
+          <button class="btn-primary" data-action="startAnalyze" id="analyzeBtn" style="flex:1;">&#9889; &#21551;&#21160;&#20998;&#26512;</button>
+          <button class="btn-sec hidden" data-action="cancel" id="cancelBtn">&#10005; &#21462;&#28040;</button>
+        </div>
+        <div id="inputErr" class="err hidden"></div>
+
+        <!-- History -->
+        <div id="historySection" style="margin-top:8px;border-top:1px solid var(--border);padding-top:6px;">
+          <div id="historyToggle" style="display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;font-size:11px;color:var(--fg-dim);" data-action="toggleHistory">
+            <span id="historyArrow" style="font-size:10px;transition:transform .15s;">&#9654;</span>
+            <span>&#21382;&#21490;&#35760;&#24405;</span>
+            <span id="historyCount" style="font-size:10px;padding:1px 5px;border-radius:8px;background:var(--border);"></span>
+            <button data-action="clearHistory" style="margin-left:auto;font-size:10px;background:none;border:none;color:var(--fg-dim);cursor:pointer;padding:2px 4px;" title="&#28165;&#31354;&#21382;&#21490;">&#10005;</button>
+          </div>
+          <div id="historyList" style="display:none;max-height:160px;overflow:auto;margin-top:4px;flex-direction:column;gap:3px;"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 2: Analysis -->
+    <div class="step-page" id="step-2">
+      <div id="wfStatus" class="status-bar hidden"></div>
+      <div class="model-tabs" id="modelTabs"></div>
+      <div class="model-tab-content" id="modelTabContent">
+        <div class="empty-state" id="analysisEmpty">&#36824;&#26410;&#24320;&#22987;&#20998;&#26512;</div>
+      </div>
+      <div id="analyzeErr" class="err hidden"></div>
+      <div class="action-row" id="toPlanRow" style="margin-top:10px;">
+        <button class="btn-primary" data-action="goToPlan" id="toPlanBtn" disabled>&#9889; &#29983;&#25104;&#35745;&#21010;</button>
+        <span class="dim" id="analysisDoneHint"></span>
+      </div>
+    </div>
+
+    <!-- Step 3: Plan -->
+    <div class="step-page" id="step-3">
+      <div id="planEmpty" class="empty-state">&#23578;&#26410;&#29983;&#25104;&#35745;&#21010; &#8212; &#35831;&#20808;&#22312; &#9313; &#20998;&#26512; &#20013;&#28857;&#20987;&#8220;&#29983;&#25104;&#35745;&#21010;&#8221;</div>
+      <div id="planStatus" class="status-bar hidden"></div>
+      <h4 id="planImgLabel" class="hidden">&#21442;&#32771;&#22270;&#29255;</h4>
+      <div id="planImgThumbs" class="img-thumbs" style="margin-bottom:8px;"></div>
+      <h4 id="planBoxLabel" class="hidden">&#25191;&#34892;&#35745;&#21010;</h4>
+      <div id="planBox" class="plan-box hidden">
+        <div class="plan-head">
+          <span class="plan-title">&#128203; &#32508;&#21512;&#25191;&#34892;&#35745;&#21010;</span>
+          <div>
+            <button class="btn-sec btn-sm" data-action="togglePlanEdit" id="planEditBtn">&#9999;&#65039; &#32534;&#36753;</button>
+          </div>
+        </div>
+        <div class="plan-body" id="planBody"></div>
+      </div>
+      <div id="planActions" class="action-row hidden">
+        <button class="btn-sec" data-action="regeneratePlan" id="regenBtn">&#128260; &#37325;&#26032;&#29983;&#25104;&#35745;&#21010;</button>
+        <button class="btn-sec" data-action="copyPlan">&#128203; &#22797;&#21046;&#35745;&#21010;</button>
+        <button class="btn-primary" data-action="goStep" data-param="4">&#19979;&#19968;&#27493; &#8594;</button>
+      </div>
+    </div>
+
+    <!-- Step 4: Execute -->
+    <div class="step-page" id="step-4">
+      <div id="execEmpty" class="empty-state">&#23578;&#26410;&#29983;&#25104;&#35745;&#21010; &#8212; &#35831;&#20808;&#23436;&#25104;&#21069;&#38754;&#30340;&#27493;&#39588;</div>
+      <div id="execContent" class="hidden" style="display:flex;flex-direction:column;gap:10px;overflow:auto;height:100%;">
+        <h4>&#25191;&#34892;&#19978;&#19979;&#25991;</h4>
+        <div class="ctx-check-row">
+          <input type="checkbox" id="attachSkills" checked>
+          <label for="attachSkills">&#21253;&#21547; Skills &#19978;&#19979;&#25991;</label>
+        </div>
+        <div class="ctx-check-row">
+          <input type="checkbox" id="attachImages" checked>
+          <label for="attachImages">&#21253;&#21547;&#21442;&#32771;&#22270;&#29255; (<span id="execImgCount">0</span> &#24352;)</label>
+        </div>
+        <div class="ctx-check-row">
+          <input type="checkbox" id="attachAnalysis" checked>
+          <label for="attachAnalysis">&#21253;&#21547;&#20998;&#26512;&#32467;&#26524;&#19978;&#19979;&#25991;</label>
+        </div>
+        <h4>&#35745;&#21010;&#39044;&#35272;</h4>
+        <div class="plan-preview" id="execPreview"></div>
+        <h4>&#25191;&#34892;&#26041;&#24335;</h4>
+        <div class="dim" style="margin-top:-6px;">&#23558;&#35745;&#21010;+&#19978;&#19979;&#25991;&#22797;&#21046;&#21040;&#21098;&#36148;&#26495;&#65292;&#31896;&#36148;&#21040; Copilot/Agent &#20013;&#25191;&#34892;</div>
+        <div class="action-row">
+          <button class="btn-primary" data-action="executeToChat" style="flex:1;">&#128203; &#22797;&#21046;&#21040;&#21098;&#36148;&#26495;</button>
+        </div>
+        <div class="token-info" id="tokenInfo">
+          <span class="dim">&#8505;&#65039; &#39044;&#35745; Token: <span id="tokenEstimate">--</span></span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script nonce="{{nonce}}" src="{{scriptUri}}"></script>
+</body>
+</html>
