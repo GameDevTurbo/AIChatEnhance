@@ -5,10 +5,10 @@ import * as crypto from 'crypto';
 import { loadMatchingSkills, getAllSkillNames, getSkillDescriptions, scanPromptTemplates, loadWorkspaceContext } from './SkillLoader';
 import {
     runModelParallelAnalysis, generatePlan, getAvailableModels,
-    analyzeConversation, regeneratePlan,
+    analyzeConversation,
 } from './LmAnalyzer';
 import type {
-    ModelConfig, ImageAttachment, ModelAnalysisResult, SkillNodeResult,
+    ModelConfig, ImageAttachment, ModelAnalysisResult,
     SavedSettings, SessionRecord, WebviewMessage, ExtensionMessage,
 } from './types';
 
@@ -26,8 +26,8 @@ export class PlannerPanel {
     private _isAnalyzing = false;
     private _disposables: vscode.Disposable[] = [];
     private _attachedImages: ImageAttachment[] = [];
+    private _imageDataUris: string[] = [];
 
-    private _lastNodes: SkillNodeResult[] = [];
     private _lastModelResults: ModelAnalysisResult[] = [];
     private _lastRequirement = '';
     private _lastSkillContext = '';
@@ -45,6 +45,16 @@ export class PlannerPanel {
               localResourceRoots: [vscode.Uri.file(path.join(context.extensionPath, 'webview'))] }
         );
         PlannerPanel._instance = new PlannerPanel(panel, context);
+    }
+
+    public static async clearCache(context: vscode.ExtensionContext): Promise<void> {
+        await context.globalState.update(STATE_KEY_SETTINGS, undefined);
+        await context.globalState.update(STATE_KEY_HISTORY, undefined);
+        vscode.window.showInformationMessage('Task Planner: 缓存已清除');
+        if (PlannerPanel._instance) {
+            PlannerPanel._instance._post({ type: 'restoreSettings', settings: null });
+            PlannerPanel._instance._post({ type: 'restoreHistory', history: [] });
+        }
     }
 
     private constructor(panel: vscode.WebviewPanel, context: vscode.ExtensionContext) {
@@ -148,6 +158,8 @@ export class PlannerPanel {
                     attachSkills: msg.attachSkills,
                     attachImages: msg.attachImages,
                     attachAnalysis: msg.attachAnalysis,
+                    inputMode: msg.inputMode,
+                    lastRequirement: msg.lastRequirement,
                 });
                 break;
             case 'clearHistory':
@@ -193,12 +205,14 @@ export class PlannerPanel {
             const ext = path.extname(uri.fsPath).toLowerCase().replace('.', '');
             const mime = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
             const base64 = Buffer.from(data).toString('base64');
+            const dataUri = `data:${mime};base64,${base64}`;
             this._attachedImages.push({ name: path.basename(uri.fsPath), mimeType: mime, data: new Uint8Array(data) });
+            this._imageDataUris.push(dataUri);
             this._post({
                 type: 'imageAdded',
                 index: this._attachedImages.length - 1,
                 name: path.basename(uri.fsPath),
-                dataUri: `data:${mime};base64,${base64}`,
+                dataUri,
             });
         }
     }
@@ -206,10 +220,11 @@ export class PlannerPanel {
     private _removeImage(index: number): void {
         if (index >= 0 && index < this._attachedImages.length) {
             this._attachedImages.splice(index, 1);
+            this._imageDataUris.splice(index, 1);
             this._post({ type: 'imagesReset', images: this._attachedImages.map((img, i) => ({
                 index: i,
                 name: img.name,
-                dataUri: `data:${img.mimeType};base64,${Buffer.from(img.data).toString('base64')}`,
+                dataUri: this._imageDataUris[i],
             })) });
         }
     }
@@ -317,9 +332,9 @@ export class PlannerPanel {
                 this._attachedImages.length > 0 ? this._attachedImages : undefined,
                 imageNames.length > 0 ? imageNames : undefined
             );
-            const planImages = this._attachedImages.map((img) => ({
+            const planImages = this._attachedImages.map((img, i) => ({
                 name: img.name,
-                dataUri: `data:${img.mimeType};base64,${Buffer.from(img.data).toString('base64')}`,
+                dataUri: this._imageDataUris[i],
             }));
             this._lastPlan = merged;
             this._appendHistory(this._lastRequirement, merged);

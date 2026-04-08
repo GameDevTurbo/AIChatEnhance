@@ -294,3 +294,48 @@ button:disabled { opacity: .4; cursor: not-allowed; }
   text-align: center; display: none;
 }
 .img-thumb:hover .img-remove { display: block; }
+
+/* ── Auto-Plan Countdown Bar ── */
+.auto-plan-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px; margin-bottom: 8px;
+  background: rgba(0,120,212,.08); border: 1px solid rgba(0,120,212,.28);
+  border-radius: var(--radius); font-size: 11px; font-weight: 600;
+  color: var(--accent); flex-shrink: 0;
+}
+.auto-plan-icon { font-size: 13px; flex-shrink: 0; }
+#autoPlanHint { flex: 1; }
+
+/* ── Markdown Plan Rendering ── */
+.plan-body { white-space: normal; }
+.plan-body .md-h2 {
+  font-size: 13px; font-weight: 700; color: var(--accent);
+  margin: 14px 0 5px; padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.plan-body .md-h3 {
+  font-size: 11px; font-weight: 700; color: var(--fg);
+  margin: 10px 0 3px; text-transform: uppercase; letter-spacing: .03em;
+}
+.plan-body .md-quote {
+  border-left: 3px solid var(--accent); padding: 4px 10px; margin: 5px 0;
+  color: var(--fg-dim); background: rgba(0,120,212,.05);
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+.plan-body .md-list { padding-left: 14px; margin: 4px 0; list-style: none; }
+.plan-body ol.md-list.md-ol { counter-reset: md-ol; }
+.plan-body ol.md-list.md-ol .md-li { counter-increment: md-ol; }
+.plan-body ol.md-list.md-ol .md-li::before {
+  content: counter(md-ol) '.'; margin-right: 6px; color: var(--accent); font-weight: 700;
+}
+.plan-body .md-li { padding: 2px 0; line-height: 1.65; }
+.plan-body .md-li.done { color: var(--fg-dim); }
+.plan-body .md-li.done .md-cb { color: var(--ok); }
+.plan-body .md-li.todo .md-cb { color: var(--fg-dim); }
+.plan-body .md-cb { margin-right: 5px; font-size: 11px; }
+.plan-body .md-code {
+  background: var(--bg-card); padding: 1px 5px; border-radius: 3px;
+  font-family: monospace; font-size: 11px; border: 1px solid var(--border);
+}
+.plan-body .md-p { margin: 2px 0; line-height: 1.65; }
+.plan-body .md-br { height: 7px; }

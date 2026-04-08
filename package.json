@@ -3,9 +3,15 @@
   "displayName": "Task Planner",
   "description": "AI 规划窗口 — 并行分析需求，自动匹配 Skill，生成执行计划",
   "version": "0.1.0",
-  "engines": { "vscode": "^1.95.0" },
-  "categories": ["AI"],
-  "activationEvents": ["onStartupFinished"],
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "AI"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "viewsContainers": {
@@ -36,6 +42,10 @@
         "command": "task-planner.openPlanner",
         "title": "Task Planner: 打开规划窗口",
         "icon": "$(robot)"
+      },
+      {
+        "command": "task-planner.clearCache",
+        "title": "Task Planner: 清除缓存设置"
       }
     ],
     "configuration": {
@@ -43,7 +53,9 @@
       "properties": {
         "aichatEnhance.hiddenModels": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": [],
           "description": "要从模型列表中隐藏的模型关键词（匹配 id / name / family，不区分大小写）"
         },
@@ -59,11 +71,16 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "package": "vsce package",
-    "vscode:prepublish": "npm run compile"
+    "vscode:prepublish": "npm run compile",
+    "test": "node test/test-pure.js && node test/integration.js && node test/integration-extra.js",
+    "test:pure": "node test/test-pure.js",
+    "test:integration": "node test/integration.js && node test/integration-extra.js",
+    "test:sandbox": "start test/sandbox.html"
   },
   "devDependencies": {
-    "@types/vscode": "^1.95.0",
     "@types/node": "^20.0.0",
+    "@types/vscode": "^1.95.0",
+    "jsdom": "^29.0.1",
     "typescript": "^5.3.0"
   }
 }

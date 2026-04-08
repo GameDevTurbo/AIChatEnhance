@@ -52,7 +52,7 @@ class PlannerPanel {
     _isAnalyzing = false;
     _disposables = [];
     _attachedImages = [];
-    _lastNodes = [];
+    _imageDataUris = [];
     _lastModelResults = [];
     _lastRequirement = '';
     _lastSkillContext = '';
@@ -65,6 +65,15 @@ class PlannerPanel {
         const panel = vscode.window.createWebviewPanel(PlannerPanel.viewType, 'Task Planner', vscode.ViewColumn.One, { enableScripts: true, retainContextWhenHidden: true,
             localResourceRoots: [vscode.Uri.file(path.join(context.extensionPath, 'webview'))] });
         PlannerPanel._instance = new PlannerPanel(panel, context);
+    }
+    static async clearCache(context) {
+        await context.globalState.update(STATE_KEY_SETTINGS, undefined);
+        await context.globalState.update(STATE_KEY_HISTORY, undefined);
+        vscode.window.showInformationMessage('Task Planner: 缓存已清除');
+        if (PlannerPanel._instance) {
+            PlannerPanel._instance._post({ type: 'restoreSettings', settings: null });
+            PlannerPanel._instance._post({ type: 'restoreHistory', history: [] });
+        }
     }
     constructor(panel, context) {
         this._panel = panel;
@@ -158,6 +167,8 @@ class PlannerPanel {
                     attachSkills: msg.attachSkills,
                     attachImages: msg.attachImages,
                     attachAnalysis: msg.attachAnalysis,
+                    inputMode: msg.inputMode,
+                    lastRequirement: msg.lastRequirement,
                 });
                 break;
             case 'clearHistory':
@@ -205,22 +216,25 @@ class PlannerPanel {
             const ext = path.extname(uri.fsPath).toLowerCase().replace('.', '');
             const mime = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
             const base64 = Buffer.from(data).toString('base64');
+            const dataUri = `data:${mime};base64,${base64}`;
             this._attachedImages.push({ name: path.basename(uri.fsPath), mimeType: mime, data: new Uint8Array(data) });
+            this._imageDataUris.push(dataUri);
             this._post({
                 type: 'imageAdded',
                 index: this._attachedImages.length - 1,
                 name: path.basename(uri.fsPath),
-                dataUri: `data:${mime};base64,${base64}`,
+                dataUri,
             });
         }
     }
     _removeImage(index) {
         if (index >= 0 && index < this._attachedImages.length) {
             this._attachedImages.splice(index, 1);
+            this._imageDataUris.splice(index, 1);
             this._post({ type: 'imagesReset', images: this._attachedImages.map((img, i) => ({
                     index: i,
                     name: img.name,
-                    dataUri: `data:${img.mimeType};base64,${Buffer.from(img.data).toString('base64')}`,
+                    dataUri: this._imageDataUris[i],
                 })) });
         }
     }
@@ -309,9 +323,9 @@ class PlannerPanel {
         try {
             const imageNames = this._attachedImages.map(img => img.name);
             const merged = await (0, LmAnalyzer_1.generatePlan)(this._lastRequirement, this._lastModelResults, mc, (m) => this._post({ type: 'status', text: m }), token, this._attachedImages.length > 0 ? this._attachedImages : undefined, imageNames.length > 0 ? imageNames : undefined);
-            const planImages = this._attachedImages.map((img) => ({
+            const planImages = this._attachedImages.map((img, i) => ({
                 name: img.name,
-                dataUri: `data:${img.mimeType};base64,${Buffer.from(img.data).toString('base64')}`,
+                dataUri: this._imageDataUris[i],
             }));
             this._lastPlan = merged;
             this._appendHistory(this._lastRequirement, merged);

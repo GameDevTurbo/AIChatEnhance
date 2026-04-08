@@ -106,22 +106,26 @@ async function getSkillDescriptions() {
 async function loadMatchingSkills(requirement) {
     const dirs = await getSkillsDirs();
     const req = requirement.toLowerCase();
-    const matched = [];
-    for (const [skillName, keywords] of Object.entries(SKILL_KEYWORD_MAP)) {
-        const isAlwaysLoad = skillName === 'SKILL';
-        const isKeywordMatch = keywords.some(kw => req.includes(kw));
-        if (!isAlwaysLoad && !isKeywordMatch) {
-            continue;
+    // 筛选需要加载的 skill 名称
+    const candidates = Object.entries(SKILL_KEYWORD_MAP)
+        .filter(([skillName, keywords]) => {
+        if (skillName === 'SKILL') {
+            return true;
         }
+        return keywords.some(kw => req.includes(kw));
+    })
+        .map(([skillName]) => skillName);
+    // 并行查找所有匹配 skill 的文件
+    const matched = await Promise.all(candidates.map(async (skillName) => {
         for (const dir of dirs) {
             const uri = vscode.Uri.joinPath(dir, `${skillName}.md`);
             if (await fileExists(uri)) {
-                matched.push({ name: skillName, content: await readText(uri) });
-                break;
+                return { name: skillName, content: await readText(uri) };
             }
         }
-    }
-    return matched;
+        return null;
+    }));
+    return matched.filter((s) => s !== null);
 }
 /** 扫描工作区中所有 .prompt.md 文件 */
 async function scanPromptTemplates() {
@@ -197,16 +201,18 @@ async function loadWorkspaceContext() {
         vscode.Uri.joinPath(rootPath, 'CLAUDE.md'),
         vscode.Uri.joinPath(rootPath, 'AGENTS.md'),
     ];
-    const parts = [];
-    for (const uri of candidates) {
-        if (await fileExists(uri)) {
-            try {
-                const content = (await readText(uri)).slice(0, 1500);
-                parts.push(`[${path.basename(uri.fsPath)}]\n${content}`);
-            }
-            catch { /* skip */ }
+    const parts = await Promise.all(candidates.map(async (uri) => {
+        if (!await fileExists(uri)) {
+            return null;
         }
-    }
-    return parts.join('\n\n');
+        try {
+            const content = (await readText(uri)).slice(0, 1500);
+            return `[${path.basename(uri.fsPath)}]\n${content}`;
+        }
+        catch {
+            return null;
+        }
+    }));
+    return parts.filter((p) => p !== null).join('\n\n');
 }
 //# sourceMappingURL=SkillLoader.js.map

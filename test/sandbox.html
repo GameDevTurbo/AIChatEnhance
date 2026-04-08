@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<!--
+  Task Planner Webview Sandbox
+  独立浏览器沙箱，无需 VS Code 即可运行 UI。
+  用法：直接用浏览器打开此文件（file:// 可用）
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Task Planner · 沙箱测试</title>
+<style>
+/* ─── 模拟 VS Code Dark Theme 变量 ─── */
+:root {
+  --vscode-editor-background: #1e1e1e;
+  --vscode-editor-foreground: #cccccc;
+  --vscode-editorWidget-background: #252526;
+  --vscode-panel-border: #444;
+  --vscode-focusBorder: #007acc;
+  --vscode-descriptionForeground: #858585;
+  --vscode-button-background: #0e639c;
+  --vscode-button-foreground: #ffffff;
+  --vscode-button-hoverBackground: #1177bb;
+  --vscode-input-background: #3c3c3c;
+  --vscode-input-foreground: #cccccc;
+  --vscode-input-border: #555;
+  --vscode-errorForeground: #f48771;
+  --vscode-font-family: 'Segoe UI', system-ui, sans-serif;
+}
+/* ─── 测试控制面板 ─── */
+#test-panel {
+  position: fixed; top: 0; right: 0; width: 280px; height: 100vh;
+  background: #1a1a2e; border-left: 1px solid #333; z-index: 9999;
+  overflow-y: auto; padding: 10px; font-family: monospace; font-size: 11px; color: #ccc;
+}
+#test-panel h3 { color: #4fc3f7; margin-bottom: 8px; font-size: 12px; }
+#test-panel h4 { color: #81c784; margin: 8px 0 4px; font-size: 11px; }
+.test-btn {
+  display: block; width: 100%; margin: 3px 0; padding: 5px 8px;
+  background: #2a2a40; border: 1px solid #444; color: #ccc;
+  cursor: pointer; border-radius: 3px; text-align: left; font-size: 10px;
+}
+.test-btn:hover { background: #3a3a50; border-color: #007acc; }
+#test-log {
+  margin-top: 10px; padding: 6px; background: #111; border-radius: 3px;
+  max-height: 300px; overflow-y: auto; font-size: 10px; line-height: 1.6;
+}
+.log-ok  { color: #4ec9b0; } .log-err { color: #f48771; }
+.log-info { color: #9cdcfe; } .log-warn { color: #e5c07b; }
+/* ─── 调整主面板宽度以为测试面板留空间 ─── */
+body { padding-right: 290px !important; }
+</style>
+</head>
+<body>
+
+<!-- ─── 主 webview 容器 ─── -->
+<div id="sandbox-app">
+  <!-- index.html 内容将由 JS 注入 -->
+</div>
+
+<!-- ─── 加载顺序：1.mock → 2.style → 3.main.js ─── -->
+<script>
+/* ════════════════════════════════════════════
+   MOCK VS CODE API
+   ════════════════════════════════════════════ */
+var _vscMessages = [];
+var _messageHandlers = [];
+
+window.acquireVsCodeApi = function() {
+  return {
+    postMessage: function(msg) {
+      _vscMessages.push(msg);
+      log('info', '→ postMessage: ' + msg.type);
+      // 自动响应部分 message 类型（模拟后端）
+      handleMockBackend(msg);
+    },
+    getState: function() { return window._sandboxState || null; },
+    setState: function(s) { window._sandboxState = s; }
+  };
+};
+
+function handleMockBackend(msg) {
+  setTimeout(function() {
+    switch (msg.type) {
+      case 'requestModels':       injectModels(); break;
+      case 'requestAllSkills':    injectSkills(); break;
+      case 'requestBrowse':       injectBrowse(); break;
+      case 'previewSkills':       injectMatchedSkills(msg.requirement || ''); break;
+      case 'requestTokenEstimate': injectTokenEstimate(); break;
+    }
+  }, 80);
+}
+
+function dispatchToWebview(data) {
+  window.dispatchEvent(new MessageEvent('message', { data: data }));
+}
+
+/* ════════════════════════════════════════════
+   TEST FIXTURES
+   ════════════════════════════════════════════ */
+var FIXTURE_MODELS = [
+  { id: 'gpt-4o',       name: 'GPT-4o',        family: 'gpt-4o',  multiplier: 0,  multiplierSource: 'table', maxInputTokens: 128000 },
+  { id: 'gpt-4.1',      name: 'GPT-4.1',       family: 'gpt-4.1', multiplier: 0,  multiplierSource: 'table', maxInputTokens: 1000000 },
+  { id: 'gpt-4.1-mini', name: 'GPT-4.1 Mini',  family: 'gpt-4.1', multiplier: 0,  multiplierSource: 'table', maxInputTokens: 1000000 },
+  { id: 'claude-sonnet-4', name: 'Claude Sonnet 4', family: 'claude', multiplier: 1, multiplierSource: 'table', maxInputTokens: 200000 },
+  { id: 'o3',           name: 'o3',             family: 'o3',      multiplier: 10, multiplierSource: 'table', maxInputTokens: 200000 },
+];
+
+var FIXTURE_SKILLS = ['SKILL', 'ui', 'battle', 'events', 'workflow', 'code', 'docs'];
+
+var FIXTURE_ANALYSIS_RESULTS = {
+  requirements: `## 需求拆解分析
+
+核心需求：为战斗系统新增倒计时奖励机制。
+
+**主要功能点：**
+- 关卡结束前10秒触发奖励窗口
+- 奖励内容基于剩余时间动态计算
+- 支持暂停/继续计时
+
+**隐含需求：**
+- UI 层需要倒计时进度条展示
+- 奖励数据需持久化`,
+
+  technical: `## 技术评估
+
+**所需技术：**
+- BattleSystem 状态机扩展
+- UniTask 异步定时器
+- DOTween UI 动画
+
+**实现难度：** 中等（3-5小时）
+
+**关键类：**
+- \`BattleManager\` — 主流程控制
+- \`RewardWindow\` — 奖励 UI (继承 UIWindow)
+- \`BattleTimer\` — 倒计时逻辑`,
+
+  risks: `## 风险与信息缺口
+
+> 注意：以下风险需要在执行前确认
+
+**不明确的地方：**
+- 倒计时的精确起点（关卡开始 or 某事件触发）
+- 奖励窗口是否支持跳过
+
+**风险：**
+- 倒计时 pause/resume 与战斗暂停逻辑冲突
+- 多次触发保护机制缺失
+
+**替代方案：** 使用现有 BonusCard 系统扩展更简单`,
+
+  execution_sequence: `## 执行顺序
+
+1. **准备阶段**：阅读 BattleManager、UIWindow 代码结构
+2. **数据层**：在 BattleData 中定义 \`timeBonus\` 字段
+3. **逻辑层**：在 BattleSystem 中注册倒计时事件
+4. **UI层**：创建 RewardWindow prefab + 脚本
+5. **接线**：BattleManager 触发 RewardWindow.Open()
+6. **测试**：在 DevelopmentBuild 场景验证全流程
+
+**可并行步骤：** 步骤 2+4 可同时进行
+**最优先准备：** 步骤 1（避免理解偏差）`,
+
+  skill_coverage: `## Skill 覆盖
+
+**需要掌握：**
+- \`LazyUniKit/UIWindow\` 基类使用模式
+- \`UniTask.Delay\` 异步定时器
+- \`LazyEvent\` 事件订阅格式
+
+**需要了解项目内容：**
+- BattleSystem 状态机的状态枚举
+- 已有 UI 窗口的 prefab 路径规范
+
+**信息缺失：**
+- 未说明奖励倍率计算公式
+
+**建议预读：**
+- \`Assets/LazyUniKit/Runtime/UI/UIWindow.cs\`
+- \`Assets/Scripts/Battle/BattleManager.cs\``
+};
+
+var FIXTURE_PLAN = `## 执行计划：战斗倒计时奖励系统
+
+### 📋 准备阶段
+- [x] 阅读 BattleManager.cs 了解状态机结构
+- [ ] 确认倒计时起点（与策划对齐）
+
+### 🔧 实现步骤
+
+1. 在 \`BattleData\` 中添加 \`timeBonus: float\` 字段
+2. 创建 \`BattleTimer\` 类，封装 UniTask 倒计时逻辑
+3. 在 BattleManager.OnTimeWarning 中分发 LazyEvent
+4. 创建 RewardWindow 继承 UIWindow，绑定动画
+5. 接线：订阅事件并调用 \`UIManager.Open<RewardWindow>()\`
+
+> 步骤 2 和 4 可以并行开发，互不依赖。
+
+### ✅ 验证清单
+- [ ] DevelopmentBuild 场景下触发倒计时
+- [ ] 奖励窗口正确显示剩余时间分数
+- [ ] 暂停游戏时倒计时停止`;
+
+function injectModels() {
+  dispatchToWebview({ type: 'models', models: FIXTURE_MODELS });
+  log('ok', '✓ 注入 ' + FIXTURE_MODELS.length + ' 个模型');
+}
+
+function injectSkills() {
+  dispatchToWebview({ type: 'allSkills', skills: FIXTURE_SKILLS });
+}
+
+function injectBrowse() {
+  dispatchToWebview({
+    type: 'browseData',
+    skills: FIXTURE_SKILLS.map(function(s) { return { name: s, hasFile: true, keywords: [s] }; }),
+    templates: [{ name: 'Battle Feature', description: '战斗功能开发模板' }]
+  });
+}
+
+function injectMatchedSkills(req) {
+  var matched = [];
+  if (/battle|战斗|奖励/i.test(req)) { matched.push('battle', 'SKILL'); }
+  if (/ui|窗口/i.test(req)) { matched.push('ui', 'SKILL'); }
+  if (/event|事件/i.test(req)) { matched.push('events', 'SKILL'); }
+  dispatchToWebview({ type: 'matchedSkills', skills: matched });
+}
+
+function injectTokenEstimate() {
+  dispatchToWebview({ type: 'tokenEstimate', estimate: '~4.2K tokens', imageCount: 0 });
+}
+
+/* ════════════════════════════════════════════
+   TEST CONTROL PANEL LOG
+   ════════════════════════════════════════════ */
+var logEl;
+function log(type, text) {
+  if (!logEl) { logEl = document.getElementById('test-log'); }
+  if (!logEl) { console.log('[' + type + '] ' + text); return; }
+  var d = document.createElement('div');
+  d.className = 'log-' + type;
+  d.textContent = text;
+  logEl.appendChild(d);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+</script>
+
+<!-- 加载真实 webview 样式 -->
+<link rel="stylesheet" href="../webview/style.css">
+
+<!-- 动态加载 index.html 内容 -->
+<script>
+(function() {
+  var req = new XMLHttpRequest();
+  req.open('GET', '../webview/index.html', true);
+  req.onload = function() {
+    // 抽取 <body> 内容（因为模板变量无法处理，我们直接嵌入），剥离 script/link 标签
+    var html = req.responseText;
+    // index.html 使用模板变量 {{cspSource}} 等，沙箱里只需要结构
+    // 从中抽取 .container 部分
+    var m = html.match(/<div class="container">([\s\S]*?)<\/div>\s*<script/);
+    if (m) {
+      document.getElementById('sandbox-app').innerHTML = '<div class="container">' + m[1] + '</div>';
+    } else {
+      // 备用：整个 body 注入
+      document.getElementById('sandbox-app').innerHTML = '<div class="container">' +
+        html.replace(/<head[\s\S]*?<\/head>/i, '').replace(/<\/?html[^>]*>/gi, '').replace(/<\/?body[^>]*>/gi, '') +
+        '</div>';
+    }
+    log('info', '✓ index.html DOM 注入完成');
+    loadMainJs();
+  };
+  req.onerror = function() {
+    // file:// 协议下 XHR 被阻止，尝试直接 iframe 方式
+    log('warn', 'XHR 被阻止（file:// 限制），切换到内联模式');
+    loadFallbackDOM();
+  };
+  req.send();
+})();
+
+function loadFallbackDOM() {
+  // 直接内联 index.html 关键结构（与 index.html 同步的备用 DOM）
+  document.getElementById('sandbox-app').innerHTML = `
+  <div class="container">
+    <div class="upper-toggle" id="upperToggle" data-action="toggleUpper">
+      <span class="arrow">&#9656;</span> Skills &amp; Templates
+      <span class="dim" id="browseStatus"></span>
+    </div>
+    <div class="upper-panel collapsed" id="upperPanel">
+      <div class="upper-body">
+        <div class="browse-section"><h5>Skills</h5><div class="browse-grid" id="browseSkills"><span class="dim">loading...</span></div></div>
+        <div class="browse-section"><h5>Prompt Templates</h5><div class="tmpl-list" id="browseTemplates"><span class="dim">loading...</span></div></div>
+      </div>
+    </div>
+    <div class="stepper-bar" id="stepperBar">
+      <div class="step-item active" data-action="goStep" data-param="1"><div class="step-num">1</div><span class="step-label">输入</span></div>
+      <div class="step-line" id="line-1-2"></div>
+      <div class="step-item" data-action="goStep" data-param="2"><div class="step-num">2</div><span class="step-label">分析</span></div>
+      <div class="step-line" id="line-2-3"></div>
+      <div class="step-item" data-action="goStep" data-param="3"><div class="step-num">3</div><span class="step-label">计划</span></div>
+      <div class="step-line" id="line-3-4"></div>
+      <div class="step-item" data-action="goStep" data-param="4"><div class="step-num">4</div><span class="step-label">执行</span></div>
+    </div>
+    <div class="step-content">
+      <!-- Step 1 -->
+      <div class="step-page active" id="step-1">
+        <div class="step1-model open" id="step1ModelSection" style="display:flex;flex-direction:column;min-height:0;overflow:hidden;border-bottom:1px solid var(--border);padding-bottom:8px;">
+          <div class="model-section-toggle open" id="modelSectionToggle" data-action="toggleModelSection">
+            <span class="arrow">&#9656;</span> 模型选择
+            <span class="dim" id="modelSummary" style="font-weight:normal;text-transform:none;letter-spacing:0;">至少一个主模型</span>
+          </div>
+          <div id="modelSectionBody" style="flex:1;min-height:0;display:flex;flex-direction:column;">
+            <div class="model-table-wrap" style="flex:1;min-height:0;">
+              <table class="model-table">
+                <thead><tr><th>主</th><th>参与</th><th>模型</th><th>上下文</th><th>倍率</th></tr></thead>
+                <tbody id="modelBody"></tbody>
+              </table>
+            </div>
+            <div class="row">
+              <button class="btn-sec btn-sm" data-action="loadModels">&#128260; 加载模型</button>
+              <span class="dim" id="modelCount"></span>
+              <button class="btn-sec btn-sm hidden" id="modelExpandBtn" data-action="toggleModelExpand">更多 &#9660;</button>
+            </div>
+          </div>
+        </div>
+        <div class="step1-input" style="flex:1;min-height:0;overflow:auto;padding-top:8px;display:flex;flex-direction:column;">
+          <div class="mode-toggle">
+            <div class="mode-btn active" data-action="setMode" data-param="requirement">需求文本</div>
+            <div class="mode-btn" data-action="setMode" data-param="conversation">对话提取</div>
+          </div>
+          <div id="modeRequirement" style="flex:1;display:flex;flex-direction:column;min-height:0;">
+            <h4>需求描述</h4>
+            <textarea id="req" style="flex:1;min-height:100px;" placeholder="描述你要做什么..."></textarea>
+            <div class="img-attach-area">
+              <div class="img-attach-row">
+                <button class="btn-sec btn-sm" data-action="attachImages">&#128444;&#65039; 附加图片</button>
+                <span class="dim" id="imgCount"></span>
+              </div>
+              <div class="img-thumbs" id="imgThumbs"></div>
+            </div>
+          </div>
+          <div id="modeConversation" class="hidden">
+            <h4>粘贴对话内容</h4>
+            <textarea id="chatInput" style="min-height:120px;" placeholder="粘贴对话..."></textarea>
+            <div class="row">
+              <button class="btn-sec" data-action="extractChat" id="extractBtn">&#128269; 提取任务</button>
+            </div>
+            <div id="extractResult" class="hidden"></div>
+          </div>
+          <h4 style="margin-top:8px;">匹配 Skills</h4>
+          <div class="skill-tags" id="skillTags"></div>
+          <div id="skillHint" class="dim" style="margin-top:4px;">输入需求后自动匹配</div>
+          <div class="row">
+            <button class="btn-primary" data-action="startAnalyze" id="analyzeBtn" style="flex:1;">&#9889; 启动分析</button>
+            <button class="btn-sec hidden" data-action="cancel" id="cancelBtn">&#10005; 取消</button>
+          </div>
+          <div id="inputErr" class="err hidden"></div>
+          <div id="historySection" style="margin-top:8px;border-top:1px solid var(--border);padding-top:6px;">
+            <div id="historyToggle" style="display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;font-size:11px;color:var(--fg-dim);" data-action="toggleHistory">
+              <span id="historyArrow" style="font-size:10px;transition:transform .15s;">&#9654;</span>
+              <span>历史记录</span>
+              <span id="historyCount" style="font-size:10px;padding:1px 5px;border-radius:8px;background:var(--border);"></span>
+              <button data-action="clearHistory" style="margin-left:auto;font-size:10px;background:none;border:none;color:var(--fg-dim);cursor:pointer;padding:2px 4px;" title="清空历史">&#10005;</button>
+            </div>
+            <div id="historyList" style="display:none;max-height:160px;overflow:auto;margin-top:4px;flex-direction:column;gap:3px;"></div>
+          </div>
+        </div>
+      </div>
+      <!-- Step 2 -->
+      <div class="step-page" id="step-2">
+        <div id="wfStatus" class="status-bar hidden"></div>
+        <div class="model-tabs" id="modelTabs"></div>
+        <div class="model-tab-content" id="modelTabContent">
+          <div class="empty-state" id="analysisEmpty">还未开始分析</div>
+        </div>
+        <div id="analyzeErr" class="err hidden"></div>
+        <div id="autoPlanBar" class="auto-plan-bar hidden">
+          <span class="auto-plan-icon">&#9889;</span>
+          <span id="autoPlanHint"></span>
+          <button class="btn-sec btn-sm" data-action="cancelAutoPlan">取消</button>
+        </div>
+        <div class="action-row" id="toPlanRow" style="margin-top:10px;">
+          <button class="btn-primary" data-action="goToPlan" id="toPlanBtn" disabled>&#9889; 生成计划</button>
+          <span class="dim" id="analysisDoneHint"></span>
+        </div>
+      </div>
+      <!-- Step 3 -->
+      <div class="step-page" id="step-3">
+        <div id="planEmpty" class="empty-state">尚未生成计划</div>
+        <div id="planStatus" class="status-bar hidden"></div>
+        <h4 id="planImgLabel" class="hidden">参考图片</h4>
+        <div id="planImgThumbs" class="img-thumbs" style="margin-bottom:8px;"></div>
+        <h4 id="planBoxLabel" class="hidden">执行计划</h4>
+        <div id="planBox" class="plan-box hidden">
+          <div class="plan-head">
+            <span class="plan-title">&#128203; 综合执行计划</span>
+            <div>
+              <button class="btn-sec btn-sm" data-action="togglePlanEdit" id="planEditBtn">&#9999;&#65039; 编辑</button>
+            </div>
+          </div>
+          <div class="plan-body" id="planBody"></div>
+        </div>
+        <div id="planActions" class="action-row hidden">
+          <button class="btn-sec" data-action="regeneratePlan" id="regenBtn">&#128260; 重新生成计划</button>
+          <button class="btn-sec" data-action="copyPlan">&#128203; 复制计划</button>
+          <button class="btn-primary" data-action="goStep" data-param="4">下一步 &rarr;</button>
+        </div>
+      </div>
+      <!-- Step 4 -->
+      <div class="step-page" id="step-4">
+        <div id="execEmpty" class="empty-state">尚未生成计划</div>
+        <div id="execContent" class="hidden" style="display:flex;flex-direction:column;gap:10px;overflow:auto;height:100%;">
+          <div class="ctx-check-row">
+            <label><input type="checkbox" id="attachSkills" checked> 附加 Skills</label>
+            <label><input type="checkbox" id="attachImages" checked> 附加图片</label>
+            <label><input type="checkbox" id="attachAnalysis" checked> 附加分析结果</label>
+          </div>
+          <div class="token-info">
+            预估 Token：<strong id="tokenEstimate">--</strong>
+            <span class="dim" id="execImgCount"></span>
+          </div>
+          <div class="plan-preview" id="execPreview"></div>
+          <div class="action-row">
+            <button class="btn-primary" data-action="executeToChat" style="flex:1;" id="executeBtn">&#9889; 发送到 Copilot Chat</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+  log('ok', '✓ 备用 DOM 注入完成');
+  loadMainJs();
+}
+
+function loadMainJs() {
+  var s = document.createElement('script');
+  s.src = '../webview/main.js';
+  s.onload = function() {
+    log('ok', '✓ main.js 加载成功');
+    // 初始化完成后自动执行第一轮测试
+    setTimeout(runAutoTests, 300);
+  };
+  s.onerror = function() { log('err', '✗ main.js 加载失败'); };
+  document.head.appendChild(s);
+}
+</script>
+
+<!-- ─── 测试控制面板 ─── -->
+<div id="test-panel">
+  <h3>🧪 沙箱测试控制台</h3>
+  <div id="test-log" style="height:120px;"></div>
+
+  <h4>📦 数据注入</h4>
+  <button class="test-btn" onclick="injectModels()">注入模型数据（含0x免费模型）</button>
+  <button class="test-btn" onclick="injectSkills()">注入 Skill 列表</button>
+  <button class="test-btn" onclick="testSetRequirement()">填写需求文本</button>
+
+  <h4>🔄 分析流程</h4>
+  <button class="test-btn" onclick="testStartAnalysis()">模拟：开始分析（5个视角）</button>
+  <button class="test-btn" onclick="testCompleteOneByOne()">模拟：逐个完成视角</button>
+  <button class="test-btn" onclick="testAllDone()">模拟：全部完成 → 触发倒计时</button>
+  <button class="test-btn" onclick="testCancelAutoPlan()">取消自动生成计划</button>
+
+  <h4>📄 计划渲染</h4>
+  <button class="test-btn" onclick="testShowPlan()">注入计划（含Markdown）</button>
+  <button class="test-btn" onclick="testMarkdownVariants()">测试 Markdown 各格式</button>
+
+  <h4>🏃 自动化</h4>
+  <button class="test-btn" onclick="runAutoTests()">▶ 运行全部自动测试</button>
+  <button class="test-btn" onclick="runFullFlow()">🎬 运行完整演示流程</button>
+  <button class="test-btn" onclick="clearLog()">清空日志</button>
+
+  <h4>📊 测试结果</h4>
+  <div id="test-results" style="font-size:10px; color:#ccc; padding:4px; background:#111; border-radius:3px; min-height:40px;"></div>
+</div>
+
+<script>
+/* ════════════════════════════════════════════
+   TEST SCENARIOS
+   ════════════════════════════════════════════ */
+
+function testSetRequirement() {
+  var el = document.getElementById('req');
+  if (el) {
+    el.value = '给战斗系统新增倒计时奖励机制，关卡结束前完成给额外分数';
+    el.dispatchEvent(new Event('input'));
+    log('ok', '✓ 需求文本已填写');
+  } else { log('err', '✗ 找不到 #req'); }
+}
+
+var _analysisModelIds = ['gpt-4o', 'gpt-4.1', 'gpt-4.1-mini', 'claude-sonnet-4', 'claude-sonnet-4-b'];
+var _analysisIdx = 0;
+
+function testStartAnalysis() {
+  dispatchToWebview({ type: 'modelAnalysisStart' });
+  log('ok', '✓ 分析启动（Step 2 激活）');
+  _analysisIdx = 0;
+  var perspectives = ['需求拆解', '技术评估', '风险与信息缺口', '执行顺序', 'Skill 覆盖'];
+  perspectives.forEach(function(label, i) {
+    setTimeout(function() {
+      var mid = 'model-' + i;
+      dispatchToWebview({ type: 'modelStart', modelId: mid, modelName: label });
+      log('info', '▶ 开始: ' + label);
+    }, 200 * (i + 1));
+  });
+}
+
+function testCompleteOneByOne() {
+  var perspectives = [
+    { id: 'model-0', key: 'requirements' },
+    { id: 'model-1', key: 'technical' },
+    { id: 'model-2', key: 'risks' },
+  ];
+  perspectives.forEach(function(p, i) {
+    setTimeout(function() {
+      dispatchToWebview({
+        type: 'modelDone',
+        modelId: p.id,
+        analysis: FIXTURE_ANALYSIS_RESULTS[p.key] || '（分析完成）'
+      });
+      log('ok', '✓ 视角完成: ' + p.id);
+    }, 400 * (i + 1));
+  });
+}
+
+function testAllDone() {
+  var roles = ['requirements', 'technical', 'risks', 'execution_sequence', 'skill_coverage'];
+  var count = 0;
+  for (var i = 0; i < 5; i++) {
+    (function(idx) {
+      setTimeout(function() {
+        dispatchToWebview({
+          type: 'modelDone',
+          modelId: 'model-' + idx,
+          analysis: FIXTURE_ANALYSIS_RESULTS[roles[idx]] || '（完成）'
+        });
+        count++;
+        if (count >= 5) {
+          setTimeout(function() {
+            dispatchToWebview({ type: 'analysisComplete' });
+            log('ok', '✓ 全部完成，触发倒计时');
+          }, 200);
+        }
+      }, 150 * (idx + 1));
+    })(i);
+  }
+}
+
+function testCancelAutoPlan() {
+  var btn = document.querySelector('[data-action="cancelAutoPlan"]');
+  if (btn) { btn.click(); log('ok', '✓ 取消自动计划'); }
+  else { log('err', '✗ 找不到 cancelAutoPlan 按钮'); }
+}
+
+function testShowPlan() {
+  dispatchToWebview({ type: 'planGenerated', merged: FIXTURE_PLAN, images: [] });
+  log('ok', '✓ 计划注入（Markdown 格式）');
+}
+
+function testMarkdownVariants() {
+  var mdTest = `## 标题测试 H2
+
+### 小标题 H3
+
+- 普通列表项
+- [x] 已完成的任务
+- [ ] 待完成的任务
+
+1. 有序列表第一步
+2. 有序列表第二步
+
+> 这是一段引用内容，用于测试引用块样式。
+
+普通段落，包含 **加粗文字** 和 \`行内代码\` 测试。
+
+最后一行纯文本测试完毕。`;
+  dispatchToWebview({ type: 'planGenerated', merged: mdTest, images: [] });
+  log('ok', '✓ Markdown 变体测试已注入');
+}
+
+/* ════════════════════════════════════════════
+   AUTOMATED TEST SUITE
+   ════════════════════════════════════════════ */
+var testResults = { pass: 0, fail: 0, errors: [] };
+
+function assert(condition, label) {
+  if (condition) {
+    testResults.pass++;
+    log('ok', '  ✓ ' + label);
+  } else {
+    testResults.fail++;
+    testResults.errors.push(label);
+    log('err', '  ✗ FAIL: ' + label);
+  }
+}
+
+function runAutoTests() {
+  testResults = { pass: 0, fail: 0, errors: [] };
+  log('info', '═════════════════════');
+  log('info', '自动测试开始');
+  log('info', '═════════════════════');
+
+  // T1: DOM 基础结构
+  log('info', '[T1] DOM 结构检查');
+  assert(!!document.getElementById('step-1'), 'step-1 存在');
+  assert(!!document.getElementById('step-2'), 'step-2 存在');
+  assert(!!document.getElementById('step-3'), 'step-3 存在');
+  assert(!!document.getElementById('step-4'), 'step-4 存在');
+  assert(!!document.getElementById('toPlanBtn'), 'toPlanBtn 存在');
+  assert(!!document.getElementById('autoPlanBar'), 'autoPlanBar 存在');
+  assert(!!document.getElementById('planBody'), 'planBody 存在');
+  assert(!!document.getElementById('req'), 'req textarea 存在');
+
+  // T2: 初始状态
+  log('info', '[T2] 初始状态');
+  assert(document.getElementById('step-1').classList.contains('active'), 'Step 1 默认激活');
+  assert(document.getElementById('toPlanBtn').disabled, 'toPlanBtn 初始禁用');
+  assert(document.getElementById('autoPlanBar').classList.contains('hidden'), 'autoPlanBar 初始隐藏');
+
+  // T3: renderMarkdown 函数存在性
+  log('info', '[T3] renderMarkdown 函数');
+  var hasMd = typeof window.renderMarkdown === 'function' || typeof renderMarkdown !== 'undefined';
+  // main.js 中 renderMarkdown 是局部函数，无法直接访问 window.renderMarkdown
+  // 但可通过注入计划来间接验证
+  assert(!!document.getElementById('planBody'), 'planBody 容器存在（MD渲染目标）');
+
+  // T4: 模型注入 + 0x 自动选
+  log('info', '[T4] 模型注入与0x自动选');
+  injectModels();
+  setTimeout(function() {
+    var rows = document.querySelectorAll('#modelBody tr');
+    assert(rows.length >= FIXTURE_MODELS.length, '模型行数正确（' + rows.length + '行）');
+
+    // 检查 0x 模型是否被自动勾选
+    var freeModelIds = FIXTURE_MODELS.filter(function(m) { return m.multiplier === 0; }).map(function(m) { return m.id; });
+    var allChecked = freeModelIds.every(function(id) {
+      var cb = document.querySelector('input.model-check[value="' + id + '"]');
+      return cb && cb.checked;
+    });
+    assert(allChecked, '所有 0x 模型自动勾选');
+
+    // T5: 分析流程
+    log('info', '[T5] 分析流程模拟');
+    testSetRequirement();
+    testStartAnalysis();
+    setTimeout(function() {
+      var tabs = document.querySelectorAll('.model-tab');
+      assert(tabs.length > 0, '模型标签页已创建');
+
+      testAllDone();
+      setTimeout(function() {
+        // 倒计时条应该显示
+        assert(!document.getElementById('autoPlanBar').classList.contains('hidden'), '全部完成后倒计时条显示');
+
+        // T6: 手动取消倒计时，跳转到 Step 3 并注入计划
+        testCancelAutoPlan();
+        assert(document.getElementById('autoPlanBar').classList.contains('hidden'), '取消后倒计时条隐藏');
+
+        // T7: Markdown 渲染
+        log('info', '[T7] Markdown 渲染');
+        testShowPlan();
+        setTimeout(function() {
+          var pb = document.getElementById('planBody');
+          assert(pb && pb.childElementCount > 0, 'planBody 渲染了 HTML 子元素');
+          assert(pb && pb.querySelector('h2'), 'planBody 包含 H2 标题');
+          assert(pb && pb.querySelector('ol, ul'), 'planBody 包含列表');
+
+          // 最终报告
+          log('info', '═════════════════════');
+          var summary = '测试完成: ' + testResults.pass + ' 通过';
+          if (testResults.fail > 0) {
+            log('err', summary + ', ' + testResults.fail + ' 失败');
+            log('err', '失败项: ' + testResults.errors.join(', '));
+          } else {
+            log('ok', '✅ ' + summary + ', 0 失败');
+          }
+
+          var r = document.getElementById('test-results');
+          if (r) {
+            r.innerHTML = '<span style="color:' + (testResults.fail > 0 ? '#f48771' : '#4ec9b0') + ';">' +
+              (testResults.fail > 0 ? '❌' : '✅') + ' ' +
+              testResults.pass + '/' + (testResults.pass + testResults.fail) + ' 通过</span>';
+          }
+        }, 600);
+      }, 1200);
+    }, 600);
+  }, 200);
+}
+
+/* ════════════════════════════════════════════
+   FULL DEMO FLOW (E2E)
+   ════════════════════════════════════════════ */
+function runFullFlow() {
+  log('info', '🎬 完整演示流程开始');
+  var steps = [
+    [100,  function() { injectModels(); }],
+    [600,  function() { testSetRequirement(); }],
+    [900,  function() { testStartAnalysis(); }],
+    [1500, function() { testAllDone(); }],
+    [3500, function() {
+      // 此时倒计时应已触发自动生成，或者点击手动
+      var btn = document.getElementById('toPlanBtn');
+      if (btn && !btn.disabled) {
+        log('info', '手动点击：生成计划');
+        // 模拟 planGenerated 返回
+        setTimeout(function() {
+          dispatchToWebview({ type: 'planGenerated', merged: FIXTURE_PLAN, images: [] });
+          log('ok', '✓ 完整流程完成，请查看 Step 3 计划页');
+        }, 300);
+      }
+    }],
+  ];
+  steps.forEach(function(s) { setTimeout(s[1], s[0]); });
+}
+
+function clearLog() {
+  if (logEl) { logEl.innerHTML = ''; }
+  else { var l = document.getElementById('test-log'); if (l) { l.innerHTML = ''; } }
+}
+</script>
+</body>
+</html>

@@ -1,9 +1,9 @@
 import * as vscode from 'vscode';
 import type {
-    SkillNodeResult, ModelAnalysisResult, WorkflowPlan,
+    ModelAnalysisResult,
     ExtractedTask, ConversationAnalysis, ModelConfig, ImageAttachment, ModelInfo,
 } from './types';
-export type { SkillNodeResult, ModelAnalysisResult, WorkflowPlan, ExtractedTask, ConversationAnalysis, ModelConfig, ImageAttachment, ModelInfo };
+export type { ModelAnalysisResult, ExtractedTask, ConversationAnalysis, ModelConfig, ImageAttachment, ModelInfo };
 
 // ─── Skill 专属分析提示 ─────────────────────────────
 const SKILL_PROMPTS: Record<string, string> = {
@@ -85,8 +85,8 @@ const MULTIPLIER_KEYWORDS: Array<[string, number]> = [
     ['opus',   3],
 ];
 
-function getMultiplier(family: string, name: string): { value: number; source: 'table' | 'keyword' } | undefined {
-    const table = getMultiplierTable();
+function getMultiplier(family: string, name: string, table?: Record<string, number>): { value: number; source: 'table' | 'keyword' } | undefined {
+    if (!table) { table = getMultiplierTable(); }
     // 1) 精确匹配 family
     const key = family.toLowerCase();
     if (table[key] !== undefined) { return { value: table[key], source: 'table' }; }
@@ -107,11 +107,12 @@ function getMultiplier(family: string, name: string): { value: number; source: '
 
 export async function getAvailableModels(hiddenPatterns?: string[]): Promise<ModelInfo[]> {
     const models = await vscode.lm.selectChatModels({ vendor: 'copilot' });
+    const multTable = getMultiplierTable();
     let result = models.map(m => {
         // 优先读运行时属性（Copilot 扩展可能注入了额外字段）
         const runtime = m as unknown as Record<string, unknown>;
         const apiMult = typeof runtime.requestMultiplier === 'number' ? runtime.requestMultiplier as number : undefined;
-        const tableMult = apiMult === undefined ? getMultiplier(m.family ?? '', m.name) : undefined;
+        const tableMult = apiMult === undefined ? getMultiplier(m.family ?? '', m.name, multTable) : undefined;
         return {
             id: m.id,
             name: m.name,
@@ -156,54 +157,6 @@ function resolveParticipants(
     return { primary, all: [primary, ...secondaries] };
 }
 
-// ─── 需求分析工作流（按 Skill 节点拆分，保留兼容） ──
-export async function runWorkflow(
-    requirement: string,
-    skills: Array<{ name: string; content: string }>,
-    modelConfig: ModelConfig,
-    onNodeStart: (skillName: string, modelName: string) => void,
-    onNodeDone: (skillName: string, analysis: string) => void,
-    onNodeError: (skillName: string, error: string) => void,
-    onProgress: (msg: string) => void,
-    token: vscode.CancellationToken,
-    images?: ImageAttachment[]
-): Promise<WorkflowPlan> {
-    const allModels = await vscode.lm.selectChatModels({ vendor: 'copilot' });
-    if (!allModels.length) {
-        throw new Error('未找到可用的 Copilot 语言模型，请确认已登录 GitHub Copilot');
-    }
-    const { primary, all } = resolveParticipants(allModels, modelConfig);
-    onProgress(`主模型: ${primary.name} | 并行处理 ${skills.length} 个节点`);
-
-    const nodePromises = skills.map(async (skill, i): Promise<SkillNodeResult> => {
-        const model = all[i % all.length];
-        onNodeStart(skill.name, model.name);
-        const prompt = SKILL_PROMPTS[skill.name] ?? '分析这个需求的关键实现要点。200字以内。';
-        const systemCtx = `你是 AI 规划助手。以下是 [${skill.name}] 参考资料：\n\n${skill.content.slice(0, 600)}\n\n`;
-        try {
-            const parts: (vscode.LanguageModelTextPart | vscode.LanguageModelDataPart)[] = [
-                new vscode.LanguageModelTextPart(`${systemCtx}用户需求：${requirement}\n\n${prompt}`)
-            ];
-            if (images?.length) {
-                for (const img of images) { parts.push(vscode.LanguageModelDataPart.image(img.data, img.mimeType)); }
-                parts.push(new vscode.LanguageModelTextPart(`\n\n以上附带了 ${images.length} 张参考图片，请结合图片内容分析。`));
-            }
-            const response = await model.sendRequest([vscode.LanguageModelChatMessage.User(parts)], {}, token);
-            const analysis = await streamToString(response, token);
-            onNodeDone(skill.name, analysis);
-            return { skillName: skill.name, analysis };
-        } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            onNodeError(skill.name, msg);
-            return { skillName: skill.name, analysis: `[错误] ${msg}` };
-        }
-    });
-
-    const nodes = await Promise.all(nodePromises);
-    const merged = '';
-    return { nodes, merged };
-}
-
 // 多视角分析视角定义
 const ANALYSIS_PERSPECTIVES = [
     {
@@ -245,6 +198,32 @@ const ANALYSIS_PERSPECTIVES = [
 
 用中文回答，300字以内，不要废话。`,
     },
+    {
+        id: 'execution_sequence',
+        label: '执行顺序',
+        prompt: `你是执行计划专家。请只根据用户提供的需求文本本身进行分析，不要假设任何技术栈。
+
+分析目标：
+1. 按正确顺序列出具体执行步骤（3-7步），每步一行
+2. 哪些步骤可以并行？哪些有依赖（必须按序）？
+3. 最优先应该做什么准备工作？
+4. 每步完成后如何快速验证结果正确？
+
+用中文回答，300字以内，不要废话。`,
+    },
+    {
+        id: 'skill_coverage',
+        label: 'Skill 覆盖',
+        prompt: `你是技术知识专家。请只根据用户提供的需求文本本身进行分析。
+
+分析目标：
+1. 实现此需求需要掌握哪些具体技术、工具或框架？
+2. 执行者需要提前了解项目哪些部分（如配置、API、数据库结构、代码模块）？
+3. 需求描述中有哪些背景信息明显缺失或不够清晰？（列出需要补充的信息）
+4. 建议执行者开始前优先阅读哪些文档或代码？
+
+用中文回答，300字以内，不要废话。`,
+    },
 ];
 
 // ─── 多视角并行分析工作流 ────────────────────────────
@@ -252,7 +231,7 @@ const ANALYSIS_PERSPECTIVES = [
 // 不注入任何预加载的项目上下文——避免错误上下文污染分析结果。
 export async function runModelParallelAnalysis(
     requirement: string,
-    _skillContext: string,    // 保留签名兼容性，分析阶段不使用
+    _skillContext: string,    // 传递给 generatePlan 使用，分析阶段不使用
     modelConfig: ModelConfig,
     onModelStart: (modelId: string, modelName: string) => void,
     onModelDone: (modelId: string, analysis: string) => void,
@@ -445,51 +424,4 @@ export async function analyzeConversation(
     }
 }
 
-// ─── 仅重新汇总计划（不重跑节点） ────────────────────
-export async function regeneratePlan(
-    requirement: string,
-    nodes: SkillNodeResult[],
-    modelConfig: ModelConfig,
-    onProgress: (msg: string) => void,
-    token: vscode.CancellationToken
-): Promise<string> {
-    const allModels = await vscode.lm.selectChatModels({ vendor: 'copilot' });
-    if (!allModels.length) {
-        throw new Error('未找到可用的 Copilot 语言模型');
-    }
-    const { primary } = resolveParticipants(allModels, modelConfig);
-    const successNodes = nodes.filter(n => !n.analysis.startsWith('[错误]'));
-    if (!successNodes.length) {
-        throw new Error('没有可用的节点分析结果');
-    }
-    onProgress(`主模型 (${primary.name}) 正在重新生成计划...`);
-    const messages = [
-        vscode.LanguageModelChatMessage.User(
-            `你是 AI 规划助手，负责综合多个分析视角生成可执行计划。\n用户需求：${requirement}\n\n` +
-            `各专项节点分析结果：\n\n` +
-            successNodes.map(n => `### [${n.skillName}]\n${n.analysis}`).join('\n\n') +
-            `\n\n综合以上分析，生成执行计划。格式：
 
-## 目标
-> 一句话说清楚要做什么、成功标准是什么
-
-## 前置确认
-在开始执行前，需要先确认以下信息：
-- [ ] 确认项目/文件位置（如有必要）
-- [ ] 确认依赖或约束（如有必要）
-
-## 任务清单
-1. 步骤一（描述要做什么，不要假设文件路径）
-2. 步骤二
-（按执行顺序，6步以内）
-
-## 注意事项
-- 风险或约束
-
-## 验证方式
-> 如何判断任务完成`
-        )
-    ];
-    const response = await primary.sendRequest(messages, {}, token);
-    return await streamToString(response, token);
-}

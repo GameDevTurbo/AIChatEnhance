@@ -9,6 +9,7 @@ let inputMode = 'requirement';
 let planText = '';
 let planEdited = '';
 let planEditMode = false;
+let _autoPlanTimer = null;
 let allSkillNames = [];
 let matchedSkillNames = [];
 let previewTimer = null;
@@ -26,7 +27,10 @@ document.addEventListener('click', function(e) {
 function handleAction(action, el) {
   const param = el.getAttribute('data-param') || '';
   switch (action) {
-    case 'goStep':          goToStep(parseInt(param)); break;
+    case 'goStep':
+      // 从当前步骤向前跳时，标记当前步骤已完成
+      if (parseInt(param) > currentStep) { markStepDone(currentStep); }
+      goToStep(parseInt(param)); break;
     case 'setMode':         setInputMode(param); break;
     case 'loadModels':      vscode.postMessage({ type: 'requestModels' }); break;
     case 'startAnalyze':    startAnalyze(); break;
@@ -44,18 +48,22 @@ function handleAction(action, el) {
     case 'switchModelTab':  switchModelTab(param); break;
     case 'toggleModelExpand': toggleModelExpand(); break;
     case 'toggleModelSection': toggleModelSection(); break;
+    case 'cancelAutoPlan':    cancelAutoPlan(); break;
     case 'toggleHistory':       toggleHistoryPanel(); break;
     case 'clearHistory':         clearAllHistory(); break;
     case 'loadHistoryItem':      loadHistoryItem(parseInt(param)); break;
   }
 }
 
+let _saveReqTimer = null;
 document.addEventListener('input', function(e) {
   if (e.target.id === 'req') {
     clearTimeout(previewTimer);
     previewTimer = setTimeout(function() {
       vscode.postMessage({ type: 'previewSkills', requirement: e.target.value.trim() });
     }, 300);
+    clearTimeout(_saveReqTimer);
+    _saveReqTimer = setTimeout(autoSaveSettings, 500);
   }
 });
 
@@ -102,6 +110,7 @@ function setInputMode(mode) {
   });
   document.getElementById('modeRequirement').classList.toggle('hidden', mode !== 'requirement');
   document.getElementById('modeConversation').classList.toggle('hidden', mode !== 'conversation');
+  autoSaveSettings();
 }
 
 /* === Models === */
@@ -145,11 +154,11 @@ function renderModels(models) {
   // auto-collapse model section after loading
   const toggle = document.getElementById('modelSectionToggle');
   const section = document.getElementById('step1ModelSection');
-  const body = document.getElementById('modelSectionBody');
+  const sectionBody = document.getElementById('modelSectionBody');
   if (toggle && toggle.classList.contains('open')) {
     toggle.classList.remove('open');
     section.classList.remove('open');
-    body.classList.add('hidden');
+    if (sectionBody) { sectionBody.classList.add('hidden'); }
   }
   const expandBtn = document.getElementById('modelExpandBtn');
   if (expandBtn) {
@@ -168,6 +177,16 @@ function renderModels(models) {
     });
     updateModelCount();
     window._pendingSecondaryIds = null;
+  } else {
+    // 没有保存的设置时，自动勾选所有 0x 免费模型作为参谋团
+    var autoSelected = false;
+    models.forEach(function(m) {
+      if (m.multiplier === 0) {
+        var cb = document.querySelector('input.model-check[value="' + escAttr(m.id) + '"]');
+        if (cb && !cb.disabled) { cb.checked = true; autoSelected = true; }
+      }
+    });
+    if (autoSelected) { updateModelCount(); }
   }
 }
 
@@ -358,8 +377,6 @@ function switchModelTab(modelId) {
 }
 
 function checkAnalysisReady() {
-  // 所有视角必须全部完成（done 或 error）才能启用"生成计划"
-  // 避免用户过早点击，导致取消仍在运行的 LM 请求（浪费已计费的 token）
   const ids = Object.keys(modelTabData);
   const allFinished = ids.length > 0 && ids.every(function(id) {
     return modelTabData[id].status === 'done' || modelTabData[id].status === 'error';
@@ -368,9 +385,36 @@ function checkAnalysisReady() {
   const hint = document.getElementById('analysisDoneHint');
   if (btn) { btn.disabled = !allFinished; }
   if (hint) { hint.textContent = doneModelCount + '/' + totalModelCount + ' \u5B8C\u6210'; }
+  if (allFinished && _autoPlanTimer === null) { startAutoPlanCountdown(); }
+}
+
+let _autoPlanSeconds = 0;
+function startAutoPlanCountdown() {
+  _autoPlanSeconds = 3;
+  showEl('autoPlanBar');
+  function tick() {
+    if (_autoPlanSeconds <= 0) {
+      hideEl('autoPlanBar');
+      _autoPlanTimer = null;
+      const btn = document.getElementById('toPlanBtn');
+      if (btn && !btn.disabled) { goToPlan(); }
+      return;
+    }
+    const h = document.getElementById('autoPlanHint');
+    if (h) { h.textContent = _autoPlanSeconds + ' \u79D2\u540E\u81EA\u52A8\u751F\u6210\u8BA1\u5212'; }
+    _autoPlanSeconds--;
+    _autoPlanTimer = setTimeout(tick, 1000);
+  }
+  tick();
+}
+
+function cancelAutoPlan() {
+  if (_autoPlanTimer) { clearTimeout(_autoPlanTimer); _autoPlanTimer = null; }
+  hideEl('autoPlanBar');
 }
 
 function goToPlan() {
+  cancelAutoPlan();
   markStepDone(2);
   goToStep(3);
   showEl('planStatus');
@@ -394,6 +438,7 @@ function resetAnalyzeStep() {
   document.getElementById('modelTabs').innerHTML = '';
   document.getElementById('modelTabContent').innerHTML = '<div class="empty-state" id="analysisEmpty">\u8FD8\u672A\u5F00\u59CB\u5206\u6790</div>';
   hideEl('wfStatus'); hideEl('analyzeErr');
+  cancelAutoPlan();
   modelTabData = {};
   activeTabId = '';
   doneModelCount = 0;
@@ -426,7 +471,7 @@ function showPlan(merged, images) {
   }
 
   const body = document.getElementById('planBody');
-  body.textContent = merged;
+  body.innerHTML = renderMarkdown(merged);
   document.getElementById('planEditBtn').textContent = '\u270F\uFE0F \u7F16\u8F91';
 
   hideEl('planEmpty');
@@ -448,7 +493,7 @@ function togglePlanEdit() {
   } else {
     const editor = document.getElementById('planEditor');
     if (editor) { planEdited = editor.value; }
-    body.textContent = planEdited || planText;
+    body.innerHTML = renderMarkdown(planEdited || planText);
     btn.textContent = '\u270F\uFE0F \u7F16\u8F91';
   }
 }
@@ -492,8 +537,13 @@ function requestTokenEstimate() {
   });
 }
 
+var _executeBusy = false;
 function executeToChat() {
-  const plan = getEffectivePlan();
+  if (_executeBusy) { return; }
+  _executeBusy = true;
+  var btn = document.getElementById('executeToChat');
+  if (btn) { btn.disabled = true; }
+  var plan = getEffectivePlan();
   vscode.postMessage({
     type: 'executeWithContext',
     planText: plan,
@@ -501,6 +551,7 @@ function executeToChat() {
     attachImages: document.getElementById('attachImages').checked,
     attachAnalysis: document.getElementById('attachAnalysis').checked,
   });
+  setTimeout(function() { _executeBusy = false; if (btn) { btn.disabled = false; } }, 2000);
 }
 
 /* === Skill Tags === */
@@ -526,6 +577,58 @@ function renderSkillTags() {
   hint.textContent = count > 0
     ? count + ' \u4E2A Skill \u5DF2\u5339\u914D\uFF08SKILL \u59CB\u7EC8\u52A0\u8F7D\uFF09'
     : '\u8F93\u5165\u9700\u6C42\u540E\u81EA\u52A8\u5339\u914D';
+}
+
+/* === Markdown Renderer === */
+function inlineMd(text) {
+  return text
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`]+)`/g, '<code class="md-code">$1</code>');
+}
+
+function renderMarkdown(text) {
+  if (!text) { return ''; }
+  const lines = text.split('\n');
+  const out = [];
+  let inUl = false;
+  let inOl = false;
+  function closeList() {
+    if (inUl) { out.push('</ul>'); inUl = false; }
+    if (inOl) { out.push('</ol>'); inOl = false; }
+  }
+  lines.forEach(function(line) {
+    if (/^## (.+)/.test(line)) {
+      closeList();
+      out.push('<h2 class="md-h2">' + inlineMd(line.replace(/^## /, '')) + '</h2>');
+    } else if (/^### (.+)/.test(line)) {
+      closeList();
+      out.push('<h3 class="md-h3">' + inlineMd(line.replace(/^### /, '')) + '</h3>');
+    } else if (/^> (.*)/.test(line)) {
+      closeList();
+      out.push('<blockquote class="md-quote">' + inlineMd(line.replace(/^> /, '')) + '</blockquote>');
+    } else if (/^- \[x\] (.+)/i.test(line)) {
+      if (!inUl) { out.push('<ul class="md-list">'); inUl = true; }
+      out.push('<li class="md-li done"><span class="md-cb">&#10003;</span> ' + inlineMd(line.replace(/^- \[x\] /i, '')) + '</li>');
+    } else if (/^- \[ \] (.+)/.test(line)) {
+      if (!inUl) { out.push('<ul class="md-list">'); inUl = true; }
+      out.push('<li class="md-li todo"><span class="md-cb">&#9744;</span> ' + inlineMd(line.replace(/^- \[ \] /, '')) + '</li>');
+    } else if (/^[-*] (.+)/.test(line)) {
+      if (!inUl) { out.push('<ul class="md-list">'); inUl = true; }
+      out.push('<li class="md-li">' + inlineMd(line.replace(/^[-*] /, '')) + '</li>');
+    } else if (/^(\d+)\. (.+)/.test(line)) {
+      if (!inOl) { closeList(); out.push('<ol class="md-list md-ol">'); inOl = true; }
+      out.push('<li class="md-li">' + inlineMd(line.replace(/^\d+\. /, '')) + '</li>');
+    } else if (!line.trim()) {
+      closeList();
+      out.push('<div class="md-br"></div>');
+    } else {
+      closeList();
+      out.push('<div class="md-p">' + inlineMd(line) + '</div>');
+    }
+  });
+  closeList();
+  return out.join('');
 }
 
 /* === Utils === */
@@ -631,6 +734,8 @@ function autoSaveSettings() {
     attachSkills: document.getElementById('attachSkills').checked,
     attachImages: document.getElementById('attachImages').checked,
     attachAnalysis: document.getElementById('attachAnalysis').checked,
+    inputMode: inputMode,
+    lastRequirement: (document.getElementById('req') || {}).value || '',
   });
 }
 
@@ -641,6 +746,11 @@ function restoreSettings(s) {
   if (s.attachAnalysis  != null) { document.getElementById('attachAnalysis').checked  = s.attachAnalysis; }
   if (s.primaryModelId) { window._pendingPrimaryId = s.primaryModelId; }
   if (s.secondaryModelIds) { window._pendingSecondaryIds = s.secondaryModelIds; }
+  if (s.inputMode) { setInputMode(s.inputMode); }
+  if (s.lastRequirement) {
+    var reqEl = document.getElementById('req');
+    if (reqEl && !reqEl.value) { reqEl.value = s.lastRequirement; }
+  }
 }
 
 /* === History Panel === */

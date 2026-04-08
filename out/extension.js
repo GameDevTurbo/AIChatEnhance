@@ -47,6 +47,10 @@ function activate(context) {
     context.subscriptions.push(vscode.commands.registerCommand('task-planner.openPlanner', () => {
         PlannerPanel_1.PlannerPanel.createOrShow(context);
     }));
+    // Command to clear cached settings & history
+    context.subscriptions.push(vscode.commands.registerCommand('task-planner.clearCache', () => {
+        PlannerPanel_1.PlannerPanel.clearCache(context);
+    }));
 }
 function deactivate() { }
 //# sourceMappingURL=extension.js.map

@@ -24,20 +24,10 @@ export interface ImageAttachment {
     data: Uint8Array;
 }
 
-export interface SkillNodeResult {
-    skillName: string;
-    analysis: string;
-}
-
 export interface ModelAnalysisResult {
     modelId: string;
     modelName: string;
     analysis: string;
-}
-
-export interface WorkflowPlan {
-    nodes: SkillNodeResult[];
-    merged: string;
 }
 
 export interface ExtractedTask {
@@ -61,6 +51,8 @@ export interface SavedSettings {
     attachSkills: boolean;
     attachImages: boolean;
     attachAnalysis: boolean;
+    inputMode: 'requirement' | 'conversation';
+    lastRequirement: string;
 }
 
 export interface SessionRecord {
@@ -106,7 +98,7 @@ export type WebviewMessage =
     | { type: 'regeneratePlan'; primaryModelId: string; secondaryModelIds: string[] }
     | { type: 'generatePlan'; primaryModelId: string; secondaryModelIds: string[] }
     | { type: 'executionPlanReady' }
-    | { type: 'saveSettings'; primaryModelId: string; secondaryModelIds: string[]; attachSkills: boolean; attachImages: boolean; attachAnalysis: boolean }
+    | { type: 'saveSettings'; primaryModelId: string; secondaryModelIds: string[]; attachSkills: boolean; attachImages: boolean; attachAnalysis: boolean; inputMode: 'requirement' | 'conversation'; lastRequirement: string }
     | { type: 'clearHistory' }
     | { type: 'loadHistorySession'; id: string }
     | { type: 'executeWithContext'; planText: string; attachSkills: boolean; attachImages: boolean; attachAnalysis: boolean }
